@@ -1,3 +1,7 @@
 \Lib\site-packages\torch\utils\data\dataloader.py", line 1145, in _try_get_data
     raise RuntimeError('DataLoader worker (pid(s) {}) exited unexpectedly'.format(pids_str)) from e
 RuntimeError: DataLoader worker (pid(s) 11384, 3188) exited unexpectedly
+ line 89, in __call__
+    image_aug = utils.read_image(dataset_dict["file_name"], format="BGR")
+                                 ~~~~~~~~~~~~^^^^^^^^^^^^^
+TypeError: string indices must be integers, not 'str'
