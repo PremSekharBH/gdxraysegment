@@ -28,14 +28,16 @@ if 'processed_file_path' not in st.session_state:
     st.session_state.processed_file_path = None
 if 'defects_info' not in st.session_state:
     st.session_state.defects_info = []
-if 'selected_defect' not in st.session_state:
-    st.session_state.selected_defect = None
 
 @st.cache_resource
 def load_image(file_path):
     img = Image.open(file_path)
-    img = img.resize((400, 400))  # Resize
-    img = np.array(img)[:, :, ::-1]  # Convert to OpenCV format
+    img = img.resize((800, 800))  # Resize
+    [m, n, o] = np.shape(img)
+
+    if o == 3:
+        img = np.array(img)[:, :, ::-1]
+    #img = np.array(img)[:, :, ::-1]  # Convert to OpenCV format
     return img
 
 @st.cache_resource
@@ -47,24 +49,16 @@ def process_image(file_path):
     with tempfile.NamedTemporaryFile(delete=False, suffix=".png") as tmp_file:
         cv2.imwrite(tmp_file.name, seg_pred_img)
         return tmp_file.name
-
+#@st.cache_resource
 def extract_defects_info(mask_img):
     """Extract defect information such as contour and area from the 2D mask image."""
     defects_info = []
     contours, _ = cv2.findContours(mask_img.astype(np.uint8), cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
     for contour in contours:
+        print(f"contour detected")
         area = cv2.contourArea(contour)
         defects_info.append({"contour": contour, "area": area})
     return defects_info
-
-def highlight_defect(image, defect_index):
-    """Highlight a specific defect in the image."""
-    if defect_index is None or not st.session_state.defects_info:
-        return image
-    defect = st.session_state.defects_info[defect_index]
-    highlighted_img = image.copy()
-    cv2.drawContours(highlighted_img, [defect['contour']], -1, (0, 255, 0), 2)
-    return highlighted_img
 
 st.set_page_config(
     layout="wide",
@@ -85,14 +79,16 @@ root = tk.Tk()
 root.withdraw()
 root.wm_attributes("-topmost", 1)
 
-# Left sidebar for defect information and buttons
+# Left sidebar for defect information
 with st.sidebar:
     st.markdown("## Defect Information")
+    #print(f"Defect Info:{st.session_state.defects_info}")
     if st.session_state.defects_info:
         for i, defect in enumerate(st.session_state.defects_info):
-            if st.button(f"Highlight Defect {i + 1}", key=f"btn_{i}"):
-                st.session_state.selected_defect = i
-                st.session_state.show_annotations = True
+            st.markdown(f"**Defect {i + 1}:**")
+            st.text(f"Area: {defect['area']:.2f}")
+    # else:
+    #     st.markdown("No defects detected.")
 
 col1, col2, col3 = st.columns([1, 4, 1])
 with col2:
@@ -100,33 +96,46 @@ with col2:
     # Align buttons horizontally
     button_col1, button_col2, button_col3 = st.columns([1, 1, 1])
     with button_col1:
+        m = buttom_markdown()
         load_click = st.button("Select Image")
     with button_col2:
+        m = buttom_markdown()
         process_click = st.button("Run ADR")
     with button_col3:
+        m = buttom_markdown()
         show_ann_click = st.button("Show/Hide")
 
     if load_click:  # Load single Image
         st.session_state.process_done = False
         st.session_state.selected_file = filedialog.askopenfilename(master=root)
         st.session_state.show_annotations = False  # Reset annotation toggle
-
+        #st.session_state.defects_info = []
         if st.session_state.selected_file:
-            st.image(load_image(st.session_state.selected_file), caption="Input Image", use_column_width=True)
+            input_img = load_image(st.session_state.selected_file)
+            image_zoom(input_img, mode="scroll", zoom_factor=4.0)
+            st.markdown("Input Image")
+            #st.image(load_image(st.session_state.selected_file), caption="Input Image", use_column_width=True)
 
     if process_click:
         if st.session_state.selected_file:
             st.session_state.processed_file_path = process_image(st.session_state.selected_file)
             st.session_state.process_done = True
             st.session_state.show_annotations = True
-            st.image(load_image(st.session_state.processed_file_path), caption="Output Image", use_column_width=True)
+            processed_img = load_image(st.session_state.processed_file_path)
+            image_zoom(processed_img, mode="scroll", zoom_factor=4.0)
+            st.markdown("Output Image")
+            #st.image(load_image(st.session_state.processed_file_path), caption="Output Image", use_column_width=True)
         else:
             st.error("⚠️ File not selected. Select an image file")
 
     if show_ann_click and st.session_state.process_done:
-        img_path = st.session_state.processed_file_path
-        processed_img = load_image(img_path)
-        if st.session_state.selected_defect is not None:
-            processed_img = highlight_defect(processed_img, st.session_state.selected_defect)
-        image_zoom(processed_img, mode="default", zoom_factor=4.0)
-        st.markdown("Output Image")
+        st.session_state.show_annotations = not st.session_state.show_annotations
+
+        if st.session_state.show_annotations:
+            processed_img = load_image(st.session_state.processed_file_path)
+            image_zoom(processed_img, mode="scroll", zoom_factor=4.0)
+            st.markdown("Output Image")
+        else:
+            input_img = load_image(st.session_state.selected_file)
+            image_zoom(input_img, mode="scroll", zoom_factor=4.0)
+            st.markdown("Input Image")
