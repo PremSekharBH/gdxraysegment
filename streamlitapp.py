@@ -2,62 +2,73 @@ import streamlit as st
 from PIL import Image
 import tkinter as tk
 from tkinter import filedialog
-from yolox_inference import InferYoloX
-from maskrcnn_infer import inference_on_image
-import matplotlib.pyplot as plt
 import cv2
-from config import _CLASSES, model_path
-import glob
-from st_utils import buttom_markdown
-import os
 import numpy as np
-import time
+import tempfile
+from maskrcnn_infer import inference_on_image
+from st_utils import buttom_markdown
+from streamlit_image_zoom import image_zoom
 
-use_case = "UT_ADR"
-default_detector_settings = {}
-default_detector_settings["UT_ADR"] = {
-    "dect_conf": 0.3,
-    "nms_conf": 0.4,
+# Default settings
+default_detector_settings = {
+    "UT_ADR": {
+        "dect_conf": 0.3,
+        "nms_conf": 0.4,
+    }
 }
 
-if 'counter' not in st.session_state: 
-    st.session_state.counter = 0
-    
-if 'process_click' not in st.session_state: 
-    st.session_state.process_click = False
-if 'process_done' not in st.session_state: 
+# Initialize session state
+if 'process_done' not in st.session_state:
     st.session_state.process_done = False
+if 'show_annotations' not in st.session_state:
+    st.session_state.show_annotations = False
+if 'selected_file' not in st.session_state:
+    st.session_state.selected_file = None
+if 'processed_file_path' not in st.session_state:
+    st.session_state.processed_file_path = None
+if 'defects_info' not in st.session_state:
+    st.session_state.defects_info = []
+if 'selected_defect' not in st.session_state:
+    st.session_state.selected_defect = None
 
-if 'show_ann_click' not in st.session_state:
-    st.session_state.show_ann_click = False
-if 'hide_ann_click' not in st.session_state:
-    st.session_state.hide_ann_click = False
-    
-if 'load_click' not in st.session_state: 
-    st.session_state.load_click = False
-
-if 'load_folder' not in st.session_state: 
-    st.session_state.load_folder = False
-
-if 'selected_file' not in st.session_state: 
-    st.session_state.selected_file = False
-    
-    
-print('-----'*4)
-for key in st.session_state:
-    print(f'{key} : {st.session_state[key]}')
-    
 @st.cache_resource
 def load_image(file_path):
     img = Image.open(file_path)
-    img = img.resize((400, 400)) #resize
-    img = np.array(img)[:, :, ::-1]  
+    img = img.resize((400, 400))  # Resize
+    img = np.array(img)[:, :, ::-1]  # Convert to OpenCV format
     return img
 
+@st.cache_resource
+def process_image(file_path):
+    # Perform inference on the image
+    seg_pred_img, mask_img = inference_on_image(file_path)
+    defects_info = extract_defects_info(mask_img)
+    st.session_state.defects_info = defects_info
+    with tempfile.NamedTemporaryFile(delete=False, suffix=".png") as tmp_file:
+        cv2.imwrite(tmp_file.name, seg_pred_img)
+        return tmp_file.name
+
+def extract_defects_info(mask_img):
+    """Extract defect information such as contour and area from the 2D mask image."""
+    defects_info = []
+    contours, _ = cv2.findContours(mask_img.astype(np.uint8), cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    for contour in contours:
+        area = cv2.contourArea(contour)
+        defects_info.append({"contour": contour, "area": area})
+    return defects_info
+
+def highlight_defect(image, defect_index):
+    """Highlight a specific defect in the image."""
+    if defect_index is None or not st.session_state.defects_info:
+        return image
+    defect = st.session_state.defects_info[defect_index]
+    highlighted_img = image.copy()
+    cv2.drawContours(highlighted_img, [defect['contour']], -1, (0, 255, 0), 2)
+    return highlighted_img
 
 st.set_page_config(
-    layout="centered",
-    initial_sidebar_state="collapsed",
+    layout="wide",
+    initial_sidebar_state="expanded",
     page_icon="👓",
     page_title="Weld ADR Segmentation",
 )
@@ -74,114 +85,48 @@ root = tk.Tk()
 root.withdraw()
 root.wm_attributes("-topmost", 1)
 
-st.text("")
-col1,col2,col3,col4,col5 = st.columns([1,1,1,1,1])
+# Left sidebar for defect information and buttons
+with st.sidebar:
+    st.markdown("## Defect Information")
+    if st.session_state.defects_info:
+        for i, defect in enumerate(st.session_state.defects_info):
+            if st.button(f"Highlight Defect {i + 1}", key=f"btn_{i}"):
+                st.session_state.selected_defect = i
+                st.session_state.show_annotations = True
 
-m = buttom_markdown()
-load_click = col2.button("Select Image")
-# m = buttom_markdown()
-# load_folder = col3.button("Select Folder")
-m = buttom_markdown()
-process_click = col3.button("Run ADR")
-m = buttom_markdown()
-show_ann_click = col4.button("Show/Hide")
+col1, col2, col3 = st.columns([1, 4, 1])
+with col2:
+    st.text("")
+    # Align buttons horizontally
+    button_col1, button_col2, button_col3 = st.columns([1, 1, 1])
+    with button_col1:
+        load_click = st.button("Select Image")
+    with button_col2:
+        process_click = st.button("Run ADR")
+    with button_col3:
+        show_ann_click = st.button("Show/Hide")
 
-if load_click: # Load single Image
-    st.session_state.process_click = False
-    st.session_state.process_done = False
-    st.session_state.load_click = True
+    if load_click:  # Load single Image
+        st.session_state.process_done = False
+        st.session_state.selected_file = filedialog.askopenfilename(master=root)
+        st.session_state.show_annotations = False  # Reset annotation toggle
 
-    #st.session_state.load_folder = False
-    st.session_state.fname = st.text_input(
-        "Selected Image File:", filedialog.askopenfilename(master=root)
-    )
-    fig, ax1 =plt.subplots(figsize = (36, 36))
-    #img = Image.open(st.session_state.fname)
-    input_img = load_image(st.session_state.fname)
-    start_time = time.time()
-    #ax1.imshow(np.array(img)[:, :, ::-1])
-    ax1.imshow(input_img)
-    #ax1.imshow(cv2.imread(st.session_state.fname)[:, :, ::-1])
-    ax1.axis("off")
-    ax1.set_title("Input Image")
+        if st.session_state.selected_file:
+            st.image(load_image(st.session_state.selected_file), caption="Input Image", use_column_width=True)
 
-    st.pyplot(fig)
-    print(f"time taken to disply image:{start_time - time.time()}")
-    if len(st.session_state.fname) == 0:
-        st.error("⚠️ File not selected. Select a image file")
-        st.stop()
-    
+    if process_click:
+        if st.session_state.selected_file:
+            st.session_state.processed_file_path = process_image(st.session_state.selected_file)
+            st.session_state.process_done = True
+            st.session_state.show_annotations = True
+            st.image(load_image(st.session_state.processed_file_path), caption="Output Image", use_column_width=True)
+        else:
+            st.error("⚠️ File not selected. Select an image file")
 
-def showPhoto(photo):
-    col2.image(cv2.imread(photo))
-    col1.write(f"Index as a session_state attribute: {st.session_state.counter}")
-    
-    ## Increments the counter to get next photo
-    st.session_state.counter += 1
-    if st.session_state.counter >= len(st.session_state.folder_image_files):
-        st.session_state.counter = 0
-    
-    st.session_state.load_folder == True
-        
-if process_click:
-    st.session_state.process_click = True
-    print(f'Select Single Button Clicked : {st.session_state.load_click}')
-    #print(f'Select Folder Button Clicked : {st.session_state.load_folder}')
-    
-    #if not ((st.session_state.load_click == True) or (st.session_state.load_folder == True)):
-    if not (st.session_state.load_click == True):
-        st.error("⚠️ File / Folder not selected. Select a image / folder using 'Select Single Image' / 'Select Folder' button")
-        st.stop()
-
-if show_ann_click:
-    st.session_state.show_ann_click = True
-    print(f'Show Annotation Button Clicked : {st.session_state.show_ann_click}')
-
-    if not (st.session_state.load_click == True):
-        st.error("⚠️ File / Folder not selected. Select a image / folder using 'Select Single Image' / 'Select Folder' button")
-        st.stop()
-
-    if not (st.session_state.process_done == True):
-        st.error("⚠️ Process not completed. Select 'Process' button")
-        st.stop()
-        
-
-
-if (st.session_state.load_click == True) and (st.session_state.process_click==True):
-    seg_pred_img = inference_on_image(st.session_state.fname)
-    fig, ax2 =plt.subplots(figsize = (36, 36))
-
-    cv2.imwrite("output.jpg", seg_pred_img)
-
-    ax2.imshow(seg_pred_img[:, :, ::-1])
-    ax2.axis("off")
-    ax2.set_title("Output Image")
-    
-    st.pyplot(fig)
-    st.session_state.process_done = True
-    st.session_state.process_click= False
-
-
-if (st.session_state.show_ann_click==True) and (st.session_state.load_click == True) and (st.session_state.process_done == True):
-    st.session_state.hide_ann_click = not st.session_state.hide_ann_click
-    if (st.session_state.hide_ann_click == True):
-        fig, ax1 =plt.subplots(figsize = (36, 36))
-        #ax1.imshow(input_img)
-        ax1.imshow(load_image(st.session_state.fname))
-        #ax1.imshow(cv2.imread(st.session_state.fname)[:, :, ::-1])
-        ax1.axis("off")
-        ax1.set_title("Input Image")
-
-        st.pyplot(fig)
-    if not (st.session_state.hide_ann_click == True):
-        fig, ax1 =plt.subplots(figsize = (36, 36))
-        out_img = load_image("output.jpg")
-        ax1.imshow(out_img)
-        #ax1.imshow(cv2.imread("output.tif")[:, :, ::-1])
-        ax1.axis("off")
-        ax1.set_title("Output Image")
-
-        st.pyplot(fig)
-    st.session_state.show_ann_click = not st.session_state.show_ann_click
-
-        
+    if show_ann_click and st.session_state.process_done:
+        img_path = st.session_state.processed_file_path
+        processed_img = load_image(img_path)
+        if st.session_state.selected_defect is not None:
+            processed_img = highlight_defect(processed_img, st.session_state.selected_defect)
+        image_zoom(processed_img, mode="default", zoom_factor=4.0)
+        st.markdown("Output Image")
