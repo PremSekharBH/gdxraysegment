@@ -79,4 +79,46 @@ with st.sidebar:
     st.markdown("## Defect Information")
     if st.session_state.defects_info:
         for i, defect in enumerate(st.session_state.defects_info):
-            st.markdown(f"**Defect
+            st.markdown(f"**Defect {i + 1}:**")
+            st.text(f"Area: {defect['area']:.2f}")
+
+col1, col2, col3 = st.columns([1, 4, 1])
+with col2:
+    st.text("")
+    # Align buttons horizontally
+    button_col1, button_col2, button_col3 = st.columns([1, 1, 1])
+    with button_col1:
+        load_click = st.button("Select Image")
+    with button_col2:
+        process_click = st.button("Run ADR")
+    with button_col3:
+        show_ann_click = st.button("Show/Hide")
+
+    if load_click:  # Load single Image
+        st.session_state.process_done = False
+        st.session_state.selected_file = filedialog.askopenfilename(master=root)
+        st.session_state.show_annotations = False  # Reset annotation toggle
+
+        if st.session_state.selected_file:
+            st.image(load_image(st.session_state.selected_file), caption="Input Image", use_column_width=True)
+
+    if process_click:
+        if st.session_state.selected_file:
+            st.session_state.processed_file_path = process_image(st.session_state.selected_file)
+            st.session_state.process_done = True
+            st.session_state.show_annotations = True
+            st.image(load_image(st.session_state.processed_file_path), caption="Output Image", use_column_width=True)
+        else:
+            st.error("⚠️ File not selected. Select an image file")
+
+    if show_ann_click and st.session_state.process_done:
+        st.session_state.show_annotations = not st.session_state.show_annotations
+
+        if st.session_state.show_annotations:
+            processed_img = load_image(st.session_state.processed_file_path)
+            image_zoom(processed_img, mode="default", zoom_factor=4.0)
+            st.markdown("Output Image")
+        else:
+            input_img = load_image(st.session_state.selected_file)
+            image_zoom(input_img, mode="default", zoom_factor=4.0)
+            st.markdown("Input Image")
