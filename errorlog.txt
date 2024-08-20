@@ -1,7 +1,75 @@
-\Lib\site-packages\torch\utils\data\dataloader.py", line 1145, in _try_get_data
-    raise RuntimeError('DataLoader worker (pid(s) {}) exited unexpectedly'.format(pids_str)) from e
-RuntimeError: DataLoader worker (pid(s) 11384, 3188) exited unexpectedly
- line 89, in __call__
-    image_aug = utils.read_image(dataset_dict["file_name"], format="BGR")
-                                 ~~~~~~~~~~~~^^^^^^^^^^^^^
-TypeError: string indices must be integers, not 'str'
+import pandas as pd
+import json
+import os
+
+def csv_to_coco(csv_file, output_json):
+    df = pd.read_csv(csv_file)
+    
+    coco_json = {
+        "info": {
+            "description": "COCO format dataset",
+            "version": "1.0",
+            "year": 2024,
+            "contributor": "Your Name",
+            "date_created": "2024-08-16"
+        },
+        "licenses": [],
+        "images": [],
+        "annotations": [],
+        "categories": []
+    }
+    
+    category_dict = {}
+    image_id_dict = {}
+    annotation_id = 0
+    
+    for _, row in df.iterrows():
+        img_name = row['img_name']
+        width = int(row['width'])
+        height = int(row['height'])
+        category_name = row['class_name']
+        xmin = int(row['xmin'])
+        ymin = int(row['ymin'])
+        xmax = int(row['xmax'])
+        ymax = int(row['ymax'])
+        bbox_width = xmax - xmin
+        bbox_height = ymax - ymin
+        
+        if category_name not in category_dict:
+            category_id = len(category_dict) + 1
+            category_dict[category_name] = category_id
+            coco_json['categories'].append({
+                "id": category_id,
+                "name": category_name,
+                "supercategory": "none"
+            })
+        
+        if img_name not in image_id_dict:
+            image_id = len(image_id_dict) + 1
+            image_id_dict[img_name] = image_id
+            coco_json['images'].append({
+                "id": image_id,
+                "file_name": os.path.basename(img_name),
+                "width": width,
+                "height": height
+            })
+        
+        annotation_id += 1
+        coco_json['annotations'].append({
+            "id": annotation_id,
+            "image_id": image_id_dict[img_name],
+            "category_id": category_dict[category_name],
+            "bbox": [xmin, ymin, bbox_width, bbox_height],
+            "area": bbox_width * bbox_height,
+            "iscrowd": 0
+        })
+    
+    with open(output_json, 'w') as f:
+        json.dump(coco_json, f, indent=4)
+
+# File paths
+csv_file_path = '/mnt/data/test.csv'
+output_json_path = '/mnt/data/output_coco.json'
+
+# Convert CSV to COCO JSON
+csv_to_coco(csv_file_path, output_json_path)
